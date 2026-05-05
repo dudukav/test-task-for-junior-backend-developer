@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"example.com/taskservice/internal/domain"
 	taskdomain "example.com/taskservice/internal/domain/task"
 )
 
@@ -34,7 +36,7 @@ func (r *Repository) Create(ctx context.Context, task *taskdomain.Task) (*taskdo
 	return created, nil
 }
 
-func (r *Repository) GetByID(ctx context.Context, id int64) (*taskdomain.Task, error) {
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*taskdomain.Task, error) {
 	const query = `
 		SELECT id, title, description, status, created_at, updated_at
 		FROM tasks
@@ -78,7 +80,7 @@ func (r *Repository) Update(ctx context.Context, task *taskdomain.Task) (*taskdo
 	return updated, nil
 }
 
-func (r *Repository) Delete(ctx context.Context, id int64) error {
+func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
 	const query = `DELETE FROM tasks WHERE id = $1`
 
 	result, err := r.pool.Exec(ctx, query, id)
@@ -144,7 +146,7 @@ func scanTask(scanner taskScanner) (*taskdomain.Task, error) {
 		return nil, err
 	}
 
-	task.Status = taskdomain.Status(status)
+	task.Status = domain.Status(status)
 
 	return &task, nil
 }

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 
 	taskdomain "example.com/taskservice/internal/domain/task"
@@ -112,19 +112,19 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func getIDFromRequest(r *http.Request) (int64, error) {
+func getIDFromRequest(r *http.Request) (uuid.UUID, error) {
 	rawID := mux.Vars(r)["id"]
 	if rawID == "" {
-		return 0, errors.New("missing task id")
+		return uuid.Nil, errors.New("missing task id")
 	}
 
-	id, err := strconv.ParseInt(rawID, 10, 64)
+	id, err := uuid.Parse(rawID)
 	if err != nil {
-		return 0, errors.New("invalid task id")
+		return uuid.Nil, errors.New("invalid task id")
 	}
 
-	if id <= 0 {
-		return 0, errors.New("invalid task id")
+	if id == uuid.Nil {
+		return uuid.Nil, errors.New("invalid task id")
 	}
 
 	return id, nil

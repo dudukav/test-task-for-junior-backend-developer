@@ -3,20 +3,22 @@ package handlers
 import (
 	"time"
 
+	"example.com/taskservice/internal/domain"
 	taskdomain "example.com/taskservice/internal/domain/task"
+	"github.com/google/uuid"
 )
 
 type taskMutationDTO struct {
 	Title       string            `json:"title"`
 	Description string            `json:"description"`
-	Status      taskdomain.Status `json:"status"`
+	Status      domain.Status `json:"status"`
 }
 
 type taskDTO struct {
-	ID          int64             `json:"id"`
+	ID          uuid.UUID           `json:"id"`
 	Title       string            `json:"title"`
 	Description string            `json:"description"`
-	Status      taskdomain.Status `json:"status"`
+	Status      domain.Status `json:"status"`
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 }

@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"example.com/taskservice/internal/domain"
 	taskdomain "example.com/taskservice/internal/domain/task"
+	"github.com/google/uuid"
 )
 
 type Service struct {
@@ -44,17 +46,17 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Ta
 	return created, nil
 }
 
-func (s *Service) GetByID(ctx context.Context, id int64) (*taskdomain.Task, error) {
-	if id <= 0 {
-		return nil, fmt.Errorf("%w: id must be positive", ErrInvalidInput)
+func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*taskdomain.Task, error) {
+	if id == uuid.Nil {
+		return nil, fmt.Errorf("%w: invalid id", ErrInvalidInput)
 	}
 
 	return s.repo.GetByID(ctx, id)
 }
 
-func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*taskdomain.Task, error) {
-	if id <= 0 {
-		return nil, fmt.Errorf("%w: id must be positive", ErrInvalidInput)
+func (s *Service) Update(ctx context.Context, id uuid.UUID, input UpdateInput) (*taskdomain.Task, error) {
+	if id == uuid.Nil {
+		return nil, fmt.Errorf("%w: invalid id", ErrInvalidInput)
 	}
 
 	normalized, err := validateUpdateInput(input)
@@ -78,9 +80,9 @@ func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*tas
 	return updated, nil
 }
 
-func (s *Service) Delete(ctx context.Context, id int64) error {
-	if id <= 0 {
-		return fmt.Errorf("%w: id must be positive", ErrInvalidInput)
+func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
+	if id == uuid.Nil {
+		return fmt.Errorf("%w: invalid id", ErrInvalidInput)
 	}
 
 	return s.repo.Delete(ctx, id)
@@ -99,7 +101,7 @@ func validateCreateInput(input CreateInput) (CreateInput, error) {
 	}
 
 	if input.Status == "" {
-		input.Status = taskdomain.StatusNew
+		input.Status = domain.StatusNew
 	}
 
 	if !input.Status.Valid() {
