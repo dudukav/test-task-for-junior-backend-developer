@@ -1,43 +1,49 @@
-package handlers
+package tasktemplate
 
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 
-	taskdomain "example.com/taskservice/internal/domain/task"
-	taskusecase "example.com/taskservice/internal/usecase/task"
+	tasktemplatedomain "example.com/taskservice/internal/domain/task_template"
+	tasktemplateusecase "example.com/taskservice/internal/usecase/task_template"
 )
 
 type TaskHandler struct {
-	usecase taskusecase.Usecase
+	usecase tasktemplateusecase.Usecase
 }
 
-func NewTaskHandler(usecase taskusecase.Usecase) *TaskHandler {
+func NewTaskTemplateHandler(usecase tasktemplateusecase.Usecase) *TaskHandler {
 	return &TaskHandler{usecase: usecase}
 }
 
 func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var req taskMutationDTO
+	var req taskTemplateMutationDTO
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	created, err := h.usecase.Create(r.Context(), taskusecase.CreateInput{
-		Title:       req.Title,
-		Description: req.Description,
-		Status:      req.Status,
+	created, err := h.usecase.Create(r.Context(), tasktemplateusecase.CreateInput{
+		Title:            req.Title,
+		Description:      req.Description,
+		AssignedID:       req.AssignedID,
+		RecurrenceType:   tasktemplatedomain.RecurrenceType(req.RecurrenceType),
+		RecurrenceConfig: req.RecurrenceConfig,
+		StartDate:        req.StartDate,
+		EndDate:          req.EndDate,
+		Status:           req.Status,
 	})
 	if err != nil {
 		writeUsecaseError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, newTaskDTO(created))
+	writeJSON(w, http.StatusCreated, newTaskTemplateDTO(created))
 }
 
 func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +59,7 @@ func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, newTaskDTO(task))
+	writeJSON(w, http.StatusOK, newTaskTemplateDTO(task))
 }
 
 func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -63,23 +69,28 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req taskMutationDTO
-	if err := decodeJSON(r, &req); err != nil {
+	var req taskTemplateMutationDTO
+	if err = decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	updated, err := h.usecase.Update(r.Context(), id, taskusecase.UpdateInput{
-		Title:       req.Title,
-		Description: req.Description,
-		Status:      req.Status,
+	updated, err := h.usecase.Update(r.Context(), id, tasktemplateusecase.UpdateInput{
+		Title:            &req.Title,
+		Description:      &req.Description,
+		AssignedID:       &req.AssignedID,
+		RecurrenceType:   (*tasktemplatedomain.RecurrenceType)(&req.RecurrenceType),
+		RecurrenceConfig: &req.RecurrenceConfig,
+		StartDate:        &req.StartDate,
+		EndDate:          req.EndDate,
+		Status:           &req.Status,
 	})
 	if err != nil {
 		writeUsecaseError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, newTaskDTO(updated))
+	writeJSON(w, http.StatusOK, newTaskTemplateDTO(updated))
 }
 
 func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +100,7 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.usecase.Delete(r.Context(), id); err != nil {
+	if err = h.usecase.Delete(r.Context(), id); err != nil {
 		writeUsecaseError(w, err)
 		return
 	}
@@ -104,9 +115,9 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := make([]taskDTO, 0, len(tasks))
+	response := make([]taskTemplateDTO, 0, len(tasks))
 	for i := range tasks {
-		response = append(response, newTaskDTO(&tasks[i]))
+		response = append(response, newTaskTemplateDTO(tasks[i]))
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -135,7 +146,7 @@ func decodeJSON(r *http.Request, dst any) error {
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(dst); err != nil {
-		return err
+		return fmt.Errorf("%w: failed to decode request", err)
 	}
 
 	return nil
@@ -143,9 +154,9 @@ func decodeJSON(r *http.Request, dst any) error {
 
 func writeUsecaseError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, taskdomain.ErrNotFound):
+	case errors.Is(err, tasktemplatedomain.ErrNotFound):
 		writeError(w, http.StatusNotFound, err)
-	case errors.Is(err, taskusecase.ErrInvalidInput):
+	case errors.Is(err, tasktemplateusecase.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, err)
 	default:
 		writeError(w, http.StatusInternalServerError, err)

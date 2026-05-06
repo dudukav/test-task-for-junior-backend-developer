@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,11 +12,20 @@ import (
 	"time"
 
 	infrastructurepostgres "example.com/taskservice/internal/infrastructure/postgres"
-	postgresrepo "example.com/taskservice/internal/repository/postgres/task"
+	"example.com/taskservice/internal/infrastructure/scheduler"
+	postgrestask "example.com/taskservice/internal/repository/postgres/task"
+	postgrestemplate "example.com/taskservice/internal/repository/postgres/task_template"
 	transporthttp "example.com/taskservice/internal/transport/http"
 	swaggerdocs "example.com/taskservice/internal/transport/http/docs"
-	httphandlers "example.com/taskservice/internal/transport/http/handlers"
+	httptaskhandlers "example.com/taskservice/internal/transport/http/handlers/task"
+	httptemplatehandlers "example.com/taskservice/internal/transport/http/handlers/task_template"
 	"example.com/taskservice/internal/usecase/task"
+	tasktemplate "example.com/taskservice/internal/usecase/task_template"
+)
+
+const (
+	readHeaderTimeoutMin = 5
+	contextTimeoutMin    = 10
 )
 
 func main() {
@@ -23,71 +33,72 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	cfg := loadConfig()
+	if err := run(logger); err != nil {
+		logger.Error("run api", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run(logger *slog.Logger) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	pool, err := infrastructurepostgres.Open(ctx, cfg.DatabaseDSN)
 	if err != nil {
-		logger.Error("open postgres", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("open postgres: %w", err)
 	}
 	defer pool.Close()
 
-	taskRepo := postgresrepo.New(pool)
+	taskRepo := postgrestask.New(pool)
 	taskUsecase := task.NewService(taskRepo)
-	taskHandler := httphandlers.NewTaskHandler(taskUsecase)
+	templateRepo := postgrestemplate.New(pool)
+	generationRepo := postgrestemplate.NewGeneration(pool)
+	templateUsecase := tasktemplate.NewWithGenerator(templateRepo, generationRepo)
+	taskHandler := httptaskhandlers.NewTaskHandler(taskUsecase)
 	docsHandler := swaggerdocs.NewHandler()
-	router := transporthttp.NewRouter(taskHandler, docsHandler)
+	templateHandler := httptemplatehandlers.NewTaskTemplateHandler(templateUsecase)
+	router := transporthttp.NewRouter(taskHandler, templateHandler, docsHandler)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           router,
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeoutMin * time.Second,
 	}
 
 	go func() {
 		<-ctx.Done()
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), contextTimeoutMin*time.Second)
 		defer cancel()
 
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			logger.Error("shutdown http server", "error", err)
+		if shutdownErr := server.Shutdown(shutdownCtx); shutdownErr != nil {
+			logger.Error("shutdown http server", "error", shutdownErr)
+		}
+	}()
+
+	taskTemplateScheduler := scheduler.New(
+		templateUsecase,
+		logger,
+		cfg.SchedulerLocation,
+		cfg.SchedulerCronSpec,
+	)
+
+	go func() {
+		if schedulerErr := taskTemplateScheduler.Run(ctx); schedulerErr != nil {
+			logger.Error("scheduler stopped", "error", schedulerErr)
 		}
 	}()
 
 	logger.Info("http server started", "addr", cfg.HTTPAddr)
 
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("listen and serve", "error", err)
-		os.Exit(1)
-	}
-}
-
-type config struct {
-	HTTPAddr    string
-	DatabaseDSN string
-}
-
-func loadConfig() config {
-	cfg := config{
-		HTTPAddr:    envOrDefault("HTTP_ADDR", ":8080"),
-		DatabaseDSN: envOrDefault("DATABASE_DSN", "postgres://postgres:postgres@localhost:5432/taskservice?sslmode=disable"),
+	if listenErr := server.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
+		return fmt.Errorf("listen and serve: %w", listenErr)
 	}
 
-	if cfg.DatabaseDSN == "" {
-		panic(fmt.Errorf("DATABASE_DSN is required"))
-	}
-
-	return cfg
-}
-
-func envOrDefault(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-
-	return fallback
+	return nil
 }

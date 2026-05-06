@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"example.com/taskservice/internal/domain"
+	taskdomain "example.com/taskservice/internal/domain/task"
 	tasktemplatedomain "example.com/taskservice/internal/domain/task_template"
 	"github.com/google/uuid"
 )
@@ -19,19 +20,30 @@ type Repository interface {
 	ListActive(ctx context.Context) ([]*tasktemplatedomain.TaskTemplate, error)
 }
 
+type GenerationRepository interface {
+	CreateTaskFromTemplate(
+		ctx context.Context,
+		template tasktemplatedomain.TaskTemplate,
+		date time.Time,
+		slot string,
+		task taskdomain.Task,
+	) (bool, error)
+}
+
 type Usecase interface {
-	CreateTemplate(ctx context.Context, input CreateInput) (*tasktemplatedomain.TaskTemplate, error)
-	GetTemplate(ctx context.Context, id uuid.UUID) (*tasktemplatedomain.TaskTemplate, error)
-	UpdateTemplate(ctx context.Context, id uuid.UUID, input UpdateInput) (*tasktemplatedomain.TaskTemplate, error)
-	DeleteTemplate(ctx context.Context, id uuid.UUID) error
-	List(ctx context.Context) []*tasktemplatedomain.TaskTemplate
-	ListActive(ctx context.Context) []*tasktemplatedomain.TaskTemplate
+	Create(ctx context.Context, input CreateInput) (*tasktemplatedomain.TaskTemplate, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*tasktemplatedomain.TaskTemplate, error)
+	Update(ctx context.Context, id uuid.UUID, input UpdateInput) (*tasktemplatedomain.TaskTemplate, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+	List(ctx context.Context) ([]*tasktemplatedomain.TaskTemplate, error)
+	ListActive(ctx context.Context) ([]*tasktemplatedomain.TaskTemplate, error)
+	GenerateTasksForDate(ctx context.Context, date time.Time) error
 }
 
 type CreateInput struct {
 	Title            string
 	Description      string
-	AssigneeID       uuid.UUID
+	AssignedID       uuid.UUID
 	RecurrenceType   tasktemplatedomain.RecurrenceType
 	RecurrenceConfig json.RawMessage
 	StartDate        time.Time
@@ -42,7 +54,7 @@ type CreateInput struct {
 type UpdateInput struct {
 	Title            *string
 	Description      *string
-	AssigneeID       *uuid.UUID
+	AssignedID       *uuid.UUID
 	RecurrenceType   *tasktemplatedomain.RecurrenceType
 	RecurrenceConfig *json.RawMessage
 	StartDate        *time.Time

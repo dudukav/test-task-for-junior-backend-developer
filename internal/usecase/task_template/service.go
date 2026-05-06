@@ -3,11 +3,13 @@ package tasktemplate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"example.com/taskservice/internal/domain"
+	taskdomain "example.com/taskservice/internal/domain/task"
 	tasktemplatedomain "example.com/taskservice/internal/domain/task_template"
 	"github.com/google/uuid"
 )
@@ -15,11 +17,14 @@ import (
 const (
 	dateLayout = "2006-01-02"
 	timeLayout = "15:04"
+	dayHours   = 24
+	even       = 2
 )
 
 type Service struct {
-	repo Repository
-	now  func() time.Time
+	repo           Repository
+	generationRepo GenerationRepository
+	now            func() time.Time
 }
 
 func New(repo Repository) Usecase {
@@ -29,7 +34,15 @@ func New(repo Repository) Usecase {
 	}
 }
 
-func (s *Service) CreateTemplate(ctx context.Context, input CreateInput) (*tasktemplatedomain.TaskTemplate, error) {
+func NewWithGenerator(repo Repository, generationRepo GenerationRepository) Usecase {
+	return &Service{
+		repo:           repo,
+		generationRepo: generationRepo,
+		now:            func() time.Time { return time.Now().UTC() },
+	}
+}
+
+func (s *Service) Create(ctx context.Context, input CreateInput) (*tasktemplatedomain.TaskTemplate, error) {
 	normalized, err := validateCreateInput(input)
 	if err != nil {
 		return nil, err
@@ -40,7 +53,7 @@ func (s *Service) CreateTemplate(ctx context.Context, input CreateInput) (*taskt
 		ID:               uuid.New(),
 		Title:            normalized.Title,
 		Description:      normalized.Description,
-		AssignedID:       normalized.AssigneeID,
+		AssignedID:       normalized.AssignedID,
 		RecurrenceType:   normalized.RecurrenceType,
 		RecurrenceConfig: normalized.RecurrenceConfig,
 		StartDate:        normalized.StartDate,
@@ -50,25 +63,36 @@ func (s *Service) CreateTemplate(ctx context.Context, input CreateInput) (*taskt
 		UpdatedAt:        now,
 	}
 
-	return s.repo.Create(ctx, model)
+	var task *tasktemplatedomain.TaskTemplate
+	task, err = s.repo.Create(ctx, model)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to create task template", err)
+	}
+
+	return task, nil
 }
 
-func (s *Service) GetTemplate(ctx context.Context, id uuid.UUID) (*tasktemplatedomain.TaskTemplate, error) {
+func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*tasktemplatedomain.TaskTemplate, error) {
 	if id == uuid.Nil {
 		return nil, fmt.Errorf("%w: invalid id", ErrInvalidInput)
 	}
 
-	return s.repo.GetByID(ctx, id)
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get task template", err)
+	}
+
+	return task, nil
 }
 
-func (s *Service) UpdateTemplate(ctx context.Context, id uuid.UUID, input UpdateInput) (*tasktemplatedomain.TaskTemplate, error) {
+func (s *Service) Update(ctx context.Context, id uuid.UUID, input UpdateInput) (*tasktemplatedomain.TaskTemplate, error) {
 	if id == uuid.Nil {
 		return nil, fmt.Errorf("%w: invalid id", ErrInvalidInput)
 	}
 
 	existing, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: failed to get task template", err)
 	}
 
 	model := *existing
@@ -78,8 +102,8 @@ func (s *Service) UpdateTemplate(ctx context.Context, id uuid.UUID, input Update
 	if input.Description != nil {
 		model.Description = strings.TrimSpace(*input.Description)
 	}
-	if input.AssigneeID != nil {
-		model.AssignedID = *input.AssigneeID
+	if input.AssignedID != nil {
+		model.AssignedID = *input.AssignedID
 	}
 	if input.RecurrenceType != nil {
 		model.RecurrenceType = *input.RecurrenceType
@@ -97,38 +121,82 @@ func (s *Service) UpdateTemplate(ctx context.Context, id uuid.UUID, input Update
 		model.Status = *input.Status
 	}
 
-	if err := validateTemplate(model); err != nil {
+	if err = validateTemplate(model); err != nil {
 		return nil, err
 	}
 
 	model.UpdatedAt = s.now()
-	return s.repo.Update(ctx, &model)
+	var task *tasktemplatedomain.TaskTemplate
+	task, err = s.repo.Update(ctx, &model)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to update task template", err)
+	}
+
+	return task, nil
 }
 
-func (s *Service) DeleteTemplate(ctx context.Context, id uuid.UUID) error {
+func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	if id == uuid.Nil {
 		return fmt.Errorf("%w: invalid id", ErrInvalidInput)
 	}
 
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("%w: failed to delete task template", err)
+	}
+
+	return nil
 }
 
-func (s *Service) List(ctx context.Context) []*tasktemplatedomain.TaskTemplate {
+func (s *Service) List(ctx context.Context) ([]*tasktemplatedomain.TaskTemplate, error) {
 	templates, err := s.repo.List(ctx)
 	if err != nil {
-		return []*tasktemplatedomain.TaskTemplate{}
+		return nil, fmt.Errorf("%w: failed to get template list", err)
 	}
 
-	return templates
+	return templates, nil
 }
 
-func (s *Service) ListActive(ctx context.Context) []*tasktemplatedomain.TaskTemplate {
+func (s *Service) ListActive(ctx context.Context) ([]*tasktemplatedomain.TaskTemplate, error) {
 	templates, err := s.repo.ListActive(ctx)
 	if err != nil {
-		return []*tasktemplatedomain.TaskTemplate{}
+		return nil, fmt.Errorf("%w: failed to get active templates list", err)
 	}
 
-	return templates
+	return templates, nil
+}
+
+func (s *Service) GenerateTasksForDate(ctx context.Context, date time.Time) error {
+	if s.generationRepo == nil {
+		return errors.New("generation repository is required")
+	}
+
+	templates, err := s.ListActive(ctx)
+
+	if err != nil {
+		return fmt.Errorf("%w: failed to get active templates list", err)
+	}
+
+	for _, template := range templates {
+		if !shouldGenerate(template, date) {
+			continue
+		}
+
+		task := &taskdomain.Task{
+			ID:          uuid.New(),
+			Title:       template.Title,
+			Description: template.Description,
+			Status:      domain.StatusNew,
+			CreatedAt:   s.now(),
+			UpdatedAt:   s.now(),
+		}
+
+		_, err = s.generationRepo.CreateTaskFromTemplate(ctx, *template, date, "", *task)
+		if err != nil {
+			return fmt.Errorf("%w: failed to create task from template", err)
+		}
+	}
+
+	return nil
 }
 
 func validateCreateInput(input CreateInput) (CreateInput, error) {
@@ -142,7 +210,7 @@ func validateCreateInput(input CreateInput) (CreateInput, error) {
 	template := tasktemplatedomain.TaskTemplate{
 		Title:            input.Title,
 		Description:      input.Description,
-		AssignedID:       input.AssigneeID,
+		AssignedID:       input.AssignedID,
 		RecurrenceType:   input.RecurrenceType,
 		RecurrenceConfig: input.RecurrenceConfig,
 		StartDate:        input.StartDate,
@@ -200,54 +268,64 @@ func validateRecurrenceConfig(recurrenceType tasktemplatedomain.RecurrenceType, 
 		return fmt.Errorf("%w: recurrence_config must be valid json", ErrInvalidInput)
 	}
 
-	var config map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &config); err != nil {
-		return fmt.Errorf("%w: recurrence_config must be an object", ErrInvalidInput)
-	}
-
-	if len(config) == 0 {
-		return fmt.Errorf("%w: recurrence_config is required", ErrInvalidInput)
-	}
-
 	switch recurrenceType {
 	case tasktemplatedomain.Daily:
-		interval, ok := readInt(config, "interval")
-		if !ok || interval < 1 {
+		var config tasktemplatedomain.DailyConfig
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return fmt.Errorf("%w: daily recurrence_config must be an object", ErrInvalidInput)
+		}
+		if config.Interval < 1 {
 			return fmt.Errorf("%w: daily interval must be greater than zero", ErrInvalidInput)
 		}
-		
+		return validateTimes(config.Times)
+
 	case tasktemplatedomain.Monthly:
-		day, ok := readInt(config, "day_of_month", "dayOfMonth", "dayofMonth")
-		if !ok || day < 1 || day > 31 {
+		var config tasktemplatedomain.MonthlyConfig
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return fmt.Errorf("%w: monthly recurrence_config must be an object", ErrInvalidInput)
+		}
+		if config.DayOfMonth < 1 || config.DayOfMonth > 31 {
 			return fmt.Errorf("%w: monthly day_of_month must be between 1 and 31", ErrInvalidInput)
 		}
+		return validateTimes(config.Times)
 
 	case tasktemplatedomain.SpecificDates:
-		date, ok := readString(config, "date")
-		if !ok {
+		var config tasktemplatedomain.SpecificDatesConfig
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return fmt.Errorf("%w: specific dates recurrence_config must be an object", ErrInvalidInput)
+		}
+		if strings.TrimSpace(config.Date) == "" {
 			return fmt.Errorf("%w: specific dates config requires date", ErrInvalidInput)
 		}
-		if _, err := time.Parse(dateLayout, date); err != nil {
+		if _, err := time.Parse(dateLayout, strings.TrimSpace(config.Date)); err != nil {
 			return fmt.Errorf("%w: date must use YYYY-MM-DD format", ErrInvalidInput)
 		}
+		return validateTimes(config.Times)
 
 	case tasktemplatedomain.DayParity:
-		parity, ok := readString(config, "parity")
-		if !ok {
+		var config tasktemplatedomain.DayParityConfig
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return fmt.Errorf("%w: day parity recurrence_config must be an object", ErrInvalidInput)
+		}
+		parity := strings.ToLower(strings.TrimSpace(config.Parity))
+		if parity == "" {
 			return fmt.Errorf("%w: day parity config requires parity", ErrInvalidInput)
 		}
-		parity = strings.ToLower(strings.TrimSpace(parity))
 		if parity != "odd" && parity != "even" {
 			return fmt.Errorf("%w: parity must be odd or even", ErrInvalidInput)
 		}
+		return validateTimes(config.Times)
 	}
 
-	times, ok := readStrings(config, "times")
-	if !ok || len(times) == 0 {
+	return nil
+}
+
+func validateTimes(times []string) error {
+	if len(times) == 0 {
 		return fmt.Errorf("%w: recurrence_config requires times", ErrInvalidInput)
 	}
 	for _, value := range times {
-		if _, err := time.Parse(timeLayout, value); err != nil {
+		if _, err := time.Parse(timeLayout, strings.TrimSpace(value)); err != nil {
 			return fmt.Errorf("%w: times must use HH:MM format", ErrInvalidInput)
 		}
 	}
@@ -255,56 +333,70 @@ func validateRecurrenceConfig(recurrenceType tasktemplatedomain.RecurrenceType, 
 	return nil
 }
 
-func readInt(config map[string]json.RawMessage, keys ...string) (int, bool) {
-	for _, key := range keys {
-		raw, ok := config[key]
-		if !ok {
-			continue
-		}
-
-		var value int
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return 0, false
-		}
-
-		return value, true
+func shouldGenerate(template *tasktemplatedomain.TaskTemplate, date time.Time) bool {
+	if template == nil {
+		return false
+	}
+	if template.Status == domain.StatusDone {
+		return false
 	}
 
-	return 0, false
+	targetDate := truncateDate(date)
+	startDate := truncateDate(template.StartDate)
+	if targetDate.Before(startDate) {
+		return false
+	}
+	if template.EndDate != nil && targetDate.After(truncateDate(*template.EndDate)) {
+		return false
+	}
+
+	switch template.RecurrenceType {
+	case tasktemplatedomain.Daily:
+		var config tasktemplatedomain.DailyConfig
+		if err := json.Unmarshal(template.RecurrenceConfig, &config); err != nil || config.Interval < 1 {
+			return false
+		}
+
+		daysFromStart := int(targetDate.Sub(startDate).Hours() / dayHours)
+		return daysFromStart%config.Interval == 0
+
+	case tasktemplatedomain.Monthly:
+		var config tasktemplatedomain.MonthlyConfig
+		if err := json.Unmarshal(template.RecurrenceConfig, &config); err != nil {
+			return false
+		}
+
+		return targetDate.Day() == config.DayOfMonth
+
+	case tasktemplatedomain.SpecificDates:
+		var config tasktemplatedomain.SpecificDatesConfig
+		if err := json.Unmarshal(template.RecurrenceConfig, &config); err != nil {
+			return false
+		}
+
+		specificDate, err := time.Parse(dateLayout, strings.TrimSpace(config.Date))
+		if err != nil {
+			return false
+		}
+
+		return targetDate.Equal(truncateDate(specificDate))
+
+	case tasktemplatedomain.DayParity:
+		var config tasktemplatedomain.DayParityConfig
+		if err := json.Unmarshal(template.RecurrenceConfig, &config); err != nil {
+			return false
+		}
+
+		parity := strings.ToLower(strings.TrimSpace(config.Parity))
+		isEvenDay := targetDate.Day()%even == 0
+		return parity == "even" && isEvenDay || parity == "odd" && !isEvenDay
+
+	default:
+		return false
+	}
 }
 
-func readString(config map[string]json.RawMessage, keys ...string) (string, bool) {
-	for _, key := range keys {
-		raw, ok := config[key]
-		if !ok {
-			continue
-		}
-
-		var value string
-		if err := json.Unmarshal(raw, &value); err != nil {
-			return "", false
-		}
-
-		return strings.TrimSpace(value), true
-	}
-
-	return "", false
-}
-
-func readStrings(config map[string]json.RawMessage, key string) ([]string, bool) {
-	raw, ok := config[key]
-	if !ok {
-		return nil, false
-	}
-
-	var values []string
-	if err := json.Unmarshal(raw, &values); err != nil {
-		return nil, false
-	}
-
-	for i := range values {
-		values[i] = strings.TrimSpace(values[i])
-	}
-
-	return values, true
+func truncateDate(value time.Time) time.Time {
+	year, month, day := value.Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }

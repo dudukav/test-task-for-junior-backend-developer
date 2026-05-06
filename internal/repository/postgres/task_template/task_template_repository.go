@@ -3,6 +3,7 @@ package tasktemplate
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"example.com/taskservice/internal/domain"
 	tasktemplatedomain "example.com/taskservice/internal/domain/task_template"
@@ -131,7 +132,7 @@ func (r *Repository) Delete(ctx context.Context, id uuid.UUID) error {
 
 	result, err := r.pool.Exec(ctx, query, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: failed to exec task", err)
 	}
 
 	if result.RowsAffected() == 0 {
@@ -153,13 +154,14 @@ func (r *Repository) List(ctx context.Context) ([]*tasktemplatedomain.TaskTempla
 
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: failed to read rows", err)
 	}
 	defer rows.Close()
 
 	tasks := make([]*tasktemplatedomain.TaskTemplate, 0)
 	for rows.Next() {
-		task, err := scanTaskTemplate(rows)
+		var task *tasktemplatedomain.TaskTemplate
+		task, err = scanTaskTemplate(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -167,8 +169,8 @@ func (r *Repository) List(ctx context.Context) ([]*tasktemplatedomain.TaskTempla
 		tasks = append(tasks, task)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: failed to read rows", err)
 	}
 
 	return tasks, nil
@@ -189,13 +191,14 @@ func (r *Repository) ListActive(ctx context.Context) ([]*tasktemplatedomain.Task
 
 	rows, err := r.pool.Query(ctx, query, domain.StatusDone)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: failed to read rows", err)
 	}
 	defer rows.Close()
 
 	tasks := make([]*tasktemplatedomain.TaskTemplate, 0)
 	for rows.Next() {
-		task, err := scanTaskTemplate(rows)
+		var task *tasktemplatedomain.TaskTemplate
+		task, err = scanTaskTemplate(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -203,8 +206,8 @@ func (r *Repository) ListActive(ctx context.Context) ([]*tasktemplatedomain.Task
 		tasks = append(tasks, task)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: failed to read rows", err)
 	}
 
 	return tasks, nil
@@ -234,7 +237,7 @@ func scanTaskTemplate(scanner taskTemplateScanner) (*tasktemplatedomain.TaskTemp
 		&template.CreatedAt,
 		&template.UpdatedAt,
 	); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: failed to scan task template", err)
 	}
 
 	template.RecurrenceType = tasktemplatedomain.RecurrenceType(recurrenceType)

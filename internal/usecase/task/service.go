@@ -30,7 +30,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Ta
 	}
 
 	model := &taskdomain.Task{
-		ID: 		 uuid.New(),
+		ID:          uuid.New(),
 		Title:       normalized.Title,
 		Description: normalized.Description,
 		Status:      normalized.Status,
@@ -41,7 +41,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Ta
 
 	created, err := s.repo.Create(ctx, model)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: failed to create task", err)
 	}
 
 	return created, nil
@@ -52,7 +52,12 @@ func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*taskdomain.Task, 
 		return nil, fmt.Errorf("%w: invalid id", ErrInvalidInput)
 	}
 
-	return s.repo.GetByID(ctx, id)
+	task, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get task", err)
+	}
+
+	return task, nil
 }
 
 func (s *Service) Update(ctx context.Context, id uuid.UUID, input UpdateInput) (*taskdomain.Task, error) {
@@ -75,7 +80,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, input UpdateInput) (
 
 	updated, err := s.repo.Update(ctx, model)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: failed to update task", err)
 	}
 
 	return updated, nil
@@ -86,11 +91,20 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("%w: invalid id", ErrInvalidInput)
 	}
 
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return fmt.Errorf("%w: failed to delete task", err)
+	}
+
+	return nil
 }
 
 func (s *Service) List(ctx context.Context) ([]taskdomain.Task, error) {
-	return s.repo.List(ctx)
+	tasks, err := s.repo.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to get task list", err)
+	}
+
+	return tasks, nil
 }
 
 func validateCreateInput(input CreateInput) (CreateInput, error) {
