@@ -1,4 +1,4 @@
-package postgres
+package task
 
 import (
 	"context"
@@ -10,13 +10,14 @@ import (
 
 	"example.com/taskservice/internal/domain"
 	taskdomain "example.com/taskservice/internal/domain/task"
+	"example.com/taskservice/internal/usecase/task"
 )
 
 type Repository struct {
 	pool *pgxpool.Pool
 }
 
-func New(pool *pgxpool.Pool) *Repository {
+func New(pool *pgxpool.Pool) task.Repository {
 	return &Repository{pool: pool}
 }
 

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	infrastructurepostgres "example.com/taskservice/internal/infrastructure/postgres"
-	postgresrepo "example.com/taskservice/internal/repository/postgres"
+	postgresrepo "example.com/taskservice/internal/repository/postgres/task"
 	transporthttp "example.com/taskservice/internal/transport/http"
 	swaggerdocs "example.com/taskservice/internal/transport/http/docs"
 	httphandlers "example.com/taskservice/internal/transport/http/handlers"

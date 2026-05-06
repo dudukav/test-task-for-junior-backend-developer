@@ -16,7 +16,7 @@ type Service struct {
 	now  func() time.Time
 }
 
-func NewService(repo Repository) *Service {
+func NewService(repo Repository) Usecase {
 	return &Service{
 		repo: repo,
 		now:  func() time.Time { return time.Now().UTC() },
@@ -30,6 +30,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Ta
 	}
 
 	model := &taskdomain.Task{
+		ID: 		 uuid.New(),
 		Title:       normalized.Title,
 		Description: normalized.Description,
 		Status:      normalized.Status,
